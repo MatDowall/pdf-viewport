@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script type="importmap">{ "imports": { "pdfjs-dist": "/node_modules/pdfjs-dist/build/pdf.mjs" } }</script>
+<style>html,body{margin:0;height:100%}#v{width:1200px;height:800px;background:#777}</style>
+</head><body><div id="v"></div>
+<script type="module">
+import * as pdfjsLib from 'pdfjs-dist';
+import { PdfViewport } from '/src/index.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/node_modules/pdfjs-dist/build/pdf.worker.mjs';
+window.pdfjsLib = pdfjsLib;
+window.vp = new PdfViewport(document.getElementById('v'));
+window.renders = [];
+vp.addEventListener('render', (e) => renders.push({ ...e.detail, t: performance.now() }));
+const data = await fetch('/test/fixtures/a1-test-sheet.pdf').then((r) => r.arrayBuffer());
+window.doc = await pdfjsLib.getDocument({ data }).promise;
+window.page = await doc.getPage(1);
+await vp.setPage(page);
+window.ready = true;
+</script></body></html>

@@ -1,0 +1,21 @@
+{
+  "name": "pdf-viewport",
+  "version": "1.0.0",
+  "description": "Fast, crisp pan/zoom PDF page viewer on PDF.js for takeoff apps",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "puppeteer-core": "^25.16.0",
+    "pdfjs-dist": "^6.5.438"
+  },
+  "type": "module",
+  "peerDependencies": {
+    "pdfjs-dist": ">=4.0.0"
+  }
+}

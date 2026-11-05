@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PdfViewport demo</title>
+<!--
+  PDF.js is loaded from a CDN here so the demo runs with no build step.
+  In a real project: `npm i pdfjs-dist` and import it normally (Vite/Webpack).
+  Serve this folder over http (e.g. `npx serve ..` from the demo folder) —
+  ES modules don't load from file://.
+-->
+<script type="importmap">
+{ "imports": {
+  "pdfjs-dist": "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.5.438/build/pdf.min.mjs"
+} }
+</script>
+<style>
+  html, body { margin: 0; height: 100%; font: 13px system-ui, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; gap: 10px; align-items: center; padding: 6px 10px; background: #223c48; color: #fff; flex-wrap: wrap; }
+  header button, header select, header label { font: inherit; }
+  #viewer { background: #6b7a80; position: relative; }
+  #drop { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; pointer-events: none; }
+  #stats { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .85; }
+  .debug .pdfv-detail { outline: 3px solid #e53935; outline-offset: -3px; }
+  .debug .pdfv-backdrop { filter: sepia(.6) hue-rotate(160deg); }
+  .measuring { cursor: crosshair; }
+</style>
+</head>
+<body>
+<header>
+  <input type="file" id="file" accept="application/pdf" />
+  <button id="prev">◀</button>
+  <span id="pageLabel">–</span>
+  <button id="next">▶</button>
+  <button id="fit">Fit</button>
+  <button id="rotate">Rotate 90°</button>
+  <label><input type="checkbox" id="debug" /> show rasters</label>
+  <label><input type="checkbox" id="quant" /> quantise zoom (8/oct)</label>
+  <label><input type="checkbox" id="measure" /> measure (click 2 points)</label>
+  <span id="stats"></span>
+</header>
+<div id="viewer"><div id="drop">Choose or drop a PDF</div></div>
+
+<script type="module">
+import * as pdfjsLib from 'pdfjs-dist';
+import { PdfViewport } from '../src/index.js';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.5.438/build/pdf.worker.min.mjs';
+
+const $ = (id) => document.getElementById(id);
+const viewerEl = $('viewer');
+
+// In a takeoff app left-click is for tools, so you'd use panButtons: [1] (middle).
+const vp = new PdfViewport(viewerEl, { panButtons: [0, 1] });
+window.vp = vp; // poke at it from devtools
+
+let task = null, doc = null, pageNo = 1, extraRotation = 0;
+
+async function open(data) {
+  await task?.destroy(); // free the previous document (pdf.js 6: destroy lives on the loading task)
+  task = pdfjsLib.getDocument({ data });
+  doc = await task.promise;
+  pageNo = 1; extraRotation = 0;
+  $('drop')?.remove();
+  await show();
+}
+async function show() {
+  const page = await doc.getPage(pageNo);
+  $('pageLabel').textContent = `${pageNo} / ${doc.numPages}`;
+  clearMarkups();
+  await vp.setPage(page, { rotation: extraRotation });
+}
+
+$('file').onchange = async (e) => { const f = e.target.files[0]; if (f) open(new Uint8Array(await f.arrayBuffer())); };
+viewerEl.ondragover = (e) => e.preventDefault();
+viewerEl.ondrop = async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) open(new Uint8Array(await f.arrayBuffer())); };
+$('prev').onclick = () => doc && pageNo > 1 && (pageNo--, show());
+$('next').onclick = () => doc && pageNo < doc.numPages && (pageNo++, show());
+$('fit').onclick = () => vp.fitPage();
+$('rotate').onclick = () => doc && ((extraRotation = (extraRotation + 90) % 360), show());
+$('debug').onchange = (e) => viewerEl.classList.toggle('debug', e.target.checked);
+$('quant').onchange = (e) => { vp.opts.zoomStepsPerOctave = e.target.checked ? 8 : 0; vp.setView(vp.getView()); };
+
+// ---- stats: proves renders only happen after movement stops, and how long they take
+let last = '';
+vp.addEventListener('render', (e) => {
+  const d = e.detail;
+  last = `${d.kind} ${d.width}×${d.height}px in ${d.ms.toFixed(0)} ms`;
+});
+vp.addEventListener('viewchange', (e) => {
+  $('stats').textContent = `zoom ${(e.detail.view.zoom * 100).toFixed(0)}%  ·  last render: ${last}`;
+});
+
+// ---- overlay example: a measuring tool drawn in the SVG overlay (stays crisp at any zoom)
+const svgNS = 'http://www.w3.org/2000/svg';
+let pts = [];
+function clearMarkups() { vp.overlayGroup.replaceChildren(); pts = []; }
+$('measure').onchange = (e) => {
+  viewerEl.classList.toggle('measuring', e.target.checked);
+  vp.opts.panButtons = e.target.checked ? [1] : [0, 1]; // left-click = tool, middle = pan
+};
+viewerEl.addEventListener('click', (e) => {
+  if (!$('measure').checked) return;
+  const r = viewerEl.getBoundingClientRect();
+  const p = vp.screenToPage(e.clientX - r.left, e.clientY - r.top); // page units
+  pts.push(p);
+  const dot = document.createElementNS(svgNS, 'circle');
+  Object.entries({ cx: p.x, cy: p.y, r: 3 / vp.view.zoom, fill: '#e53935' }).forEach(([k, v]) => dot.setAttribute(k, v));
+  vp.overlayGroup.appendChild(dot);
+  if (pts.length === 2) {
+    const [a, b] = pts;
+    const line = document.createElementNS(svgNS, 'line');
+    Object.entries({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#e53935', 'stroke-width': 2,
+      'vector-effect': 'non-scaling-stroke' }).forEach(([k, v]) => line.setAttribute(k, v));
+    vp.overlayGroup.appendChild(line);
+    // Page units are PDF points (1/72"). On-paper distance in mm; multiply by the drawing scale (e.g. 100 for 1:100).
+    const mm = Math.hypot(b.x - a.x, b.y - a.y) * 25.4 / 72;
+    const label = document.createElementNS(svgNS, 'text');
+    Object.entries({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, fill: '#e53935',
+      'font-size': 14 / vp.view.zoom }).forEach(([k, v]) => label.setAttribute(k, v));
+    label.textContent = `${mm.toFixed(1)} mm on paper`;
+    vp.overlayGroup.appendChild(label);
+    pts = [];
+  }
+});
+</script>
+</body>
+</html>
